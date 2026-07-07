@@ -58,7 +58,8 @@ function normalizeString(str) {
 }
 
 // Algoritmo Jaro-Winkler para búsqueda difusa (Fuzzy Matching)
-function getJaroWinklerSimilarity(s1, s2) {
+// Algoritmo Jaro-Winkler puro para búsqueda difusa (Fuzzy Matching)
+function pureJaroWinkler(s1, s2) {
   s1 = normalizeString(s1);
   s2 = normalizeString(s2);
 
@@ -116,28 +117,60 @@ function getJaroWinklerSimilarity(s1, s2) {
 
   const winklerScalingFactor = 0.1;
   const jaroWinkler = jaro + prefixLength * winklerScalingFactor * (1.0 - jaro);
+  return parseFloat(jaroWinkler.toFixed(4));
+}
 
-  let finalScore = jaroWinkler;
+// Algoritmo Jaro-Winkler personalizado (con penalización por palabra única y diferencia de longitud)
+function getJaroWinklerSimilarity(s1, s2) {
+  const clean1 = normalizeString(s1);
+  const clean2 = normalizeString(s2);
 
-  // 1. Penalización para palabras únicas contra nombres compuestos (evita que "ROBERTO" coincida con "ROBERTO ITURRA" con puntaje crítico)
-  const w1 = s1.split(/\s+/).filter(Boolean).length;
-  const w2 = s2.split(/\s+/).filter(Boolean).length;
+  let score = pureJaroWinkler(clean1, clean2);
+
+  // 1. Penalización para palabras únicas contra nombres compuestos
+  const w1 = clean1.split(/\s+/).filter(Boolean).length;
+  const w2 = clean2.split(/\s+/).filter(Boolean).length;
   if ((w1 === 1 && w2 > 1) || (w2 === 1 && w1 > 1)) {
-    finalScore *= 0.75; // Penalización del 25%
+    score *= 0.75; // Penalización del 25%
   }
 
-  // 2. Penalización por diferencia de caracteres proporcional si la diferencia es alta (evita falsos positivos por subcadenas muy cortas)
-  const maxLen = Math.max(s1.length, s2.length);
-  const minLen = Math.min(s1.length, s2.length);
+  // 2. Penalización por diferencia de longitud
+  const maxLen = Math.max(clean1.length, clean2.length);
+  const minLen = Math.min(clean1.length, clean2.length);
   if (maxLen > 0) {
     const lenRatio = minLen / maxLen;
     if (lenRatio < 0.7) {
-      const penalty = 0.8 + (lenRatio * 0.2); // Factor de penalización suave entre 0.8 y 0.94
-      finalScore *= penalty;
+      score *= lenRatio;
     }
   }
 
-  return parseFloat(finalScore.toFixed(4));
+  return parseFloat(score.toFixed(4));
+}
+
+// Cobertura del Input — Token-Set (NUEVO en v1.3)
+function tokenSetCoverage(clientName, dbName, perTokenThreshold = 0.85) {
+  const ta = normalizeString(clientName).split(' ').filter(Boolean);
+  const tb = normalizeString(dbName).split(' ').filter(Boolean);
+  if (ta.length < 2) return 0; // guarda: mínimo 2 tokens en el input
+
+  const used = new Set();
+  let covered = 0;
+  for (const tk of ta) {
+    let best = 0, bestIdx = -1;
+    tb.forEach((cand, i) => {
+      if (used.has(i)) return;
+      const s = pureJaroWinkler(tk, cand);
+      if (s > best) {
+        best = s;
+        bestIdx = i;
+      }
+    });
+    if (best >= perTokenThreshold) {
+      used.add(bestIdx);
+      covered++;
+    }
+  }
+  return parseFloat((covered / ta.length).toFixed(4));
 }
 
 // Descarga inicial y almacenamiento local
@@ -268,56 +301,128 @@ app.get('/api/list', (req, res) => {
   });
 });
 
+// Helper para evaluar un registro completo (Personas o Entidades) contra las 4 señales
+function evaluateRecord(query, record, type, cfg) {
+  // Coincidencia exacta de documento (si es numérico o alfanumérico)
+  let docMatched = false;
+  let matchedDocNumber = '';
+  if (type === 'personas' && record.INDIVIDUAL_DOCUMENT && Array.isArray(record.INDIVIDUAL_DOCUMENT)) {
+    const cleanQuery = normalizeString(query);
+    record.INDIVIDUAL_DOCUMENT.forEach(doc => {
+      if (doc.NUMBER && cleanQuery.length >= 6) {
+        const cleanDoc = normalizeString(doc.NUMBER);
+        if (cleanDoc === cleanQuery || cleanDoc.includes(cleanQuery) || cleanQuery.includes(cleanDoc)) {
+          docMatched = true;
+          matchedDocNumber = doc.NUMBER;
+        }
+      }
+    });
+  }
+
+  if (docMatched) {
+    return {
+      state: 'ROJO',
+      via: 'DOCUMENT',
+      score: 1.0,
+      coverage: 0.0,
+      matchedField: 'Coincidencia de Documento',
+      matchedValue: matchedDocNumber,
+      isAlias: false,
+      quality: ''
+    };
+  }
+
+  // Evaluar nombres principales y alias
+  const candidates = [];
+  if (type === 'personas') {
+    const fullName = [record.FIRST_NAME, record.SECOND_NAME, record.THIRD_NAME, record.FOURTH_NAME].filter(Boolean).join(' ');
+    candidates.push({ name: fullName, field: 'Nombre Completo', isAlias: false, quality: '' });
+    if (record.INDIVIDUAL_ALIAS && Array.isArray(record.INDIVIDUAL_ALIAS)) {
+      record.INDIVIDUAL_ALIAS.forEach(alias => {
+        if (alias.ALIAS_NAME) {
+          candidates.push({
+            name: alias.ALIAS_NAME,
+            field: `Alias (${alias.QUALITY || 'Alternativo'})`,
+            isAlias: true,
+            quality: alias.QUALITY || ''
+          });
+        }
+      });
+    }
+  } else {
+    // Entidades
+    candidates.push({ name: record.FIRST_NAME, field: 'Nombre de Entidad', isAlias: false, quality: '' });
+    if (record.ENTITY_ALIAS && Array.isArray(record.ENTITY_ALIAS)) {
+      record.ENTITY_ALIAS.forEach(alias => {
+        if (alias.ALIAS_NAME) {
+          candidates.push({
+            name: alias.ALIAS_NAME,
+            field: 'Alias de Entidad',
+            isAlias: true,
+            quality: 'Alternativo'
+          });
+        }
+      });
+    }
+  }
+
+  let bestEval = { state: 'VERDE', via: 'NONE', score: 0.0, coverage: 0.0, matchedField: '', matchedValue: '', isAlias: false, quality: '' };
+
+  candidates.forEach(cand => {
+    const jwScore = getJaroWinklerSimilarity(query, cand.name);
+    const cov = tokenSetCoverage(query, cand.name);
+
+    let state = 'VERDE';
+    let via = 'NONE';
+
+    if (jwScore >= cfg.jwRed) {
+      state = 'ROJO';
+      via = cand.isAlias ? 'ALIAS' : 'FULL_NAME';
+    } else if (jwScore >= cfg.jwYellow || cov >= cfg.coverage) {
+      state = 'AMARILLO';
+      via = (cov >= cfg.coverage) ? 'TOKEN_SET' : (cand.isAlias ? 'ALIAS' : 'FULL_NAME');
+    }
+
+    // Clasificar severidad: ROJO > AMARILLO > VERDE
+    const stateRank = { 'ROJO': 3, 'AMARILLO': 2, 'VERDE': 1 };
+    const currentRank = stateRank[state];
+    const bestRank = stateRank[bestEval.state];
+
+    if (currentRank > bestRank) {
+      bestEval = { state, via, score: jwScore, coverage: cov, matchedField: cand.field, matchedValue: cand.name, isAlias: cand.isAlias, quality: cand.quality };
+    } else if (currentRank === bestRank) {
+      // Ante mismo estado, priorizar mayor JW score
+      if (jwScore > bestEval.score || (jwScore === bestEval.score && cov > bestEval.coverage)) {
+        bestEval = { state, via, score: jwScore, coverage: cov, matchedField: cand.field, matchedValue: cand.name, isAlias: cand.isAlias, quality: cand.quality };
+      }
+    }
+  });
+
+  return bestEval;
+}
+
 // Endpoint de Screening / Búsqueda Difusa (Fuzzy Match)
 app.get('/api/search', (req, res) => {
   const query = req.query.q;
-  const threshold = parseFloat(req.query.threshold) || 0.8; // Porcentaje mínimo para alertar
+  
+  // Parámetros configurables de thresholds
+  const jwYellow = parseFloat(req.query.threshold) || 0.75;
+  const jwRed = parseFloat(req.query.jwRed) || 0.90;
+  const coverage = parseFloat(req.query.coverage) || 0.80;
+  const cfg = { jwYellow, jwRed, coverage };
 
   if (!query) {
     return res.status(400).json({ error: 'Falta el parámetro de búsqueda "q".' });
   }
 
   const results = [];
-  const cleanQuery = normalizeString(query);
 
   // 1. Evaluar Personas
   cache.personas.forEach(p => {
     const fullName = [p.FIRST_NAME, p.SECOND_NAME, p.THIRD_NAME, p.FOURTH_NAME].filter(Boolean).join(' ');
-    
-    // Comparar contra nombre completo
-    let maxScore = getJaroWinklerSimilarity(query, fullName);
-    let matchedField = 'Nombre Completo';
-    let matchedValue = fullName;
+    const evaluation = evaluateRecord(query, p, 'personas', cfg);
 
-    // Comparar contra alias
-    if (p.INDIVIDUAL_ALIAS && Array.isArray(p.INDIVIDUAL_ALIAS)) {
-      p.INDIVIDUAL_ALIAS.forEach(alias => {
-        if (alias.ALIAS_NAME) {
-          const score = getJaroWinklerSimilarity(query, alias.ALIAS_NAME);
-          if (score > maxScore) {
-            maxScore = score;
-            matchedField = `Alias (${alias.QUALITY || 'Alternativo'})`;
-            matchedValue = alias.ALIAS_NAME;
-          }
-        }
-      });
-    }
-
-    // Coincidencia exacta de documento (si es numérico o alfanumérico)
-    let hasDirectDocMatch = false;
-    if (p.INDIVIDUAL_DOCUMENT && Array.isArray(p.INDIVIDUAL_DOCUMENT)) {
-      p.INDIVIDUAL_DOCUMENT.forEach(doc => {
-        if (doc.NUMBER && cleanQuery.length >= 6) {
-          const cleanDoc = normalizeString(doc.NUMBER);
-          if (cleanDoc === cleanQuery || cleanDoc.includes(cleanQuery) || cleanQuery.includes(cleanDoc)) {
-            hasDirectDocMatch = true;
-          }
-        }
-      });
-    }
-
-    // Agregar si supera el umbral o si hay match exacto de documento
-    if (maxScore >= threshold || hasDirectDocMatch) {
+    if (evaluation.state === 'ROJO' || evaluation.state === 'AMARILLO') {
       results.push({
         type: 'persona',
         id: p.DATAID,
@@ -328,9 +433,14 @@ app.get('/api/search', (req, res) => {
         aliases: p.INDIVIDUAL_ALIAS || [],
         documents: p.INDIVIDUAL_DOCUMENT || [],
         nationalities: p.NATIONALITY || [],
-        score: hasDirectDocMatch ? 1.0 : maxScore,
-        matchedField: hasDirectDocMatch ? 'Coincidencia de Documento' : matchedField,
-        matchedValue: hasDirectDocMatch ? 'Documento Identidad' : matchedValue
+        state: evaluation.state,
+        via: evaluation.via,
+        score: evaluation.score,
+        coverage: evaluation.coverage,
+        matchedField: evaluation.matchedField,
+        matchedValue: evaluation.matchedValue,
+        isAlias: evaluation.isAlias,
+        quality: evaluation.quality
       });
     }
   });
@@ -338,24 +448,9 @@ app.get('/api/search', (req, res) => {
   // 2. Evaluar Entidades
   cache.entidades.forEach(e => {
     const entityName = e.FIRST_NAME;
-    let maxScore = getJaroWinklerSimilarity(query, entityName);
-    let matchedField = 'Nombre de Entidad';
-    let matchedValue = entityName;
+    const evaluation = evaluateRecord(query, e, 'entidades', cfg);
 
-    if (e.ENTITY_ALIAS && Array.isArray(e.ENTITY_ALIAS)) {
-      e.ENTITY_ALIAS.forEach(alias => {
-        if (alias.ALIAS_NAME) {
-          const score = getJaroWinklerSimilarity(query, alias.ALIAS_NAME);
-          if (score > maxScore) {
-            maxScore = score;
-            matchedField = `Alias de Entidad`;
-            matchedValue = alias.ALIAS_NAME;
-          }
-        }
-      });
-    }
-
-    if (maxScore >= threshold) {
+    if (evaluation.state === 'ROJO' || evaluation.state === 'AMARILLO') {
       results.push({
         type: 'entidad',
         id: e.DATAID,
@@ -366,19 +461,60 @@ app.get('/api/search', (req, res) => {
         aliases: e.ENTITY_ALIAS || [],
         documents: [],
         nationalities: [],
-        score: maxScore,
-        matchedField,
-        matchedValue
+        state: evaluation.state,
+        via: evaluation.via,
+        score: evaluation.score,
+        coverage: evaluation.coverage,
+        matchedField: evaluation.matchedField,
+        matchedValue: evaluation.matchedValue,
+        isAlias: evaluation.isAlias,
+        quality: evaluation.quality
       });
     }
   });
 
-  // Ordenar de mayor a menor similitud (score)
-  results.sort((a, b) => b.score - a.score);
+  // Ordenamiento con reglas de desempate (DOCUMENT > FULL_NAME > ALIAS, y alias_quality = "Good")
+  results.sort((a, b) => {
+    // A. Ordenar por severidad de estado
+    const stateRank = { 'ROJO': 2, 'AMARILLO': 1, 'VERDE': 0 };
+    const rankDiff = stateRank[b.state] - stateRank[a.state];
+    if (rankDiff !== 0) return rankDiff;
+
+    // B. Ordenar por score descendente
+    const scoreDiff = b.score - a.score;
+    if (Math.abs(scoreDiff) > 0.0001) return scoreDiff;
+
+    // C. Ordenar por vía de coincidencia (DOCUMENT > FULL_NAME > ALIAS)
+    const viaRank = (item) => {
+      if (item.via === 'DOCUMENT') return 3;
+      if (!item.isAlias) return 2;
+      return 1;
+    };
+    const viaDiff = viaRank(b) - viaRank(a);
+    if (viaDiff !== 0) return viaDiff;
+
+    // D. Ordenar por calidad de alias (Good > Others)
+    if (a.isAlias && b.isAlias) {
+      const qA = (a.quality || '').toLowerCase() === 'good' ? 1 : 0;
+      const qB = (b.quality || '').toLowerCase() === 'good' ? 1 : 0;
+      return qB - qA;
+    }
+
+    return 0;
+  });
+
+  // Determinar estado global (el peor de todos los candidatos)
+  let globalState = 'VERDE';
+  if (results.some(r => r.state === 'ROJO')) {
+    globalState = 'ROJO';
+  } else if (results.some(r => r.state === 'AMARILLO')) {
+    globalState = 'AMARILLO';
+  }
 
   res.json({
     query,
-    threshold,
+    thresholds: cfg,
+    globalState,
     resultsCount: results.length,
     results
   });
