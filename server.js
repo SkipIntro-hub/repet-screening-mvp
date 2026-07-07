@@ -30,6 +30,21 @@ const CACHE_DIR = path.join(__dirname, 'cache');
 const BACKUP_PERSONAS = path.join(CACHE_DIR, 'personas_backup.json');
 const BACKUP_ENTIDADES = path.join(CACHE_DIR, 'entidades_backup.json');
 
+// Cargar respaldos de forma síncrona al inicio para evitar esperas en Vercel (Cold Starts)
+try {
+  if (fs.existsSync(BACKUP_PERSONAS)) {
+    cache.personas = JSON.parse(fs.readFileSync(BACKUP_PERSONAS, 'utf-8'));
+    cache.status = 'ready';
+    cache.lastUpdated = fs.statSync(BACKUP_PERSONAS).mtime.toISOString();
+  }
+  if (fs.existsSync(BACKUP_ENTIDADES)) {
+    cache.entidades = JSON.parse(fs.readFileSync(BACKUP_ENTIDADES, 'utf-8'));
+  }
+  console.log(`Caché inicializada síncronamente: ${cache.personas.length} personas, ${cache.entidades.length} entidades.`);
+} catch (err) {
+  console.warn('Error en carga síncrona inicial:', err.message);
+}
+
 // Normalización de texto (elimina acentos, mayúsculas, caracteres especiales)
 function normalizeString(str) {
   if (!str) return '';
