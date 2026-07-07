@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Simulador de cumplimiento y screening de clientes contra el listado de terroristas oficial de RePET (Argentina).">
+  <!-- Google Fonts: Inter & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="main-header">
+      <div class="logo-area">
+        <span class="logo-icon">🛡️</span>
+        <div>
+          <h1>RePET Screening</h1>
+          </div>
+      </div>
+      <div class="sync-status" id="syncStatus">
+        <span class="pulse-indicator"></span>
+        <span class="status-text">Conectando...</span>
+        <button id="btnRefresh" class="btn-refresh" title="Sincronizar base de datos de RePET">🔄 Sincronizar</button>
+      </div>
+    </header>
+
+    <!-- Stats Dashboard -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">👤</div>
+        <div class="stat-content">
+          <h3>Total Personas</h3>
+          <p class="stat-value" id="statPersonas">-</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🏢</div>
+        <div class="stat-content">
+          <h3>Total Entidades</h3>
+          <p class="stat-value" id="statEntidades">-</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🕒</div>
+        <div class="stat-content">
+          <h3>Última Sincronización</h3>
+          <p class="stat-value" id="statLastUpdate" style="font-size: 1.1rem; line-height: 2.2rem;">-</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Content Area -->
+    <main class="main-layout">
+      <!-- Left Column: Screening Simulator -->
+      <section class="panel screening-panel">
+        <div class="panel-header">
+          <h2>🔍 Simulador de Screening (Fuzzy Match)</h2>
+          <p class="panel-desc">Compara un cliente contra los listados oficiales usando el algoritmo Jaro-Winkler.</p>
+        </div>
+        <div class="panel-body">
+          <form id="screeningForm" class="screening-form">
+            <div class="form-group">
+              <label for="clientName">Nombre o Documento del Cliente</label>
+              <input type="text" id="clientName" placeholder="Ej: Aamir Ali Chaudry o José El Reda..." required autocomplete="off">
+            </div>
+            
+            <div class="form-group">
+              <div class="slider-header">
+                <label for="threshold">Umbral de Similitud (Jaro-Winkler)</label>
+                <span class="slider-value" id="thresholdValue">80%</span>
+              </div>
+              <input type="range" id="threshold" min="50" max="100" value="80" class="range-slider">
+              <span class="help-text">Valores más altos exigen mayor coincidencia de deletreo. Recomendado: 80%.</span>
+            </div>
+
+            <button type="submit" class="btn-primary" id="btnRunScreening">Evaluar Riesgo</button>
+          </form>
+
+          <!-- Screening Results -->
+          <div class="results-container" id="resultsContainer" style="display: none;">
+            <div class="results-header">
+              <h3 id="resultsTitle">Resultados del Análisis</h3>
+              <span id="resultsCountBadge" class="results-count-badge">0</span>
+            </div>
+            <div class="results-list" id="resultsList">
+              <!-- Renderizado dinámico desde app.js -->
+            </div>
+          </div>
+
+          <!-- Empty State / Welcome Screen inside Screening -->
+          <div class="welcome-screen" id="screeningWelcome">
+            <div class="welcome-icon">🛡️</div>
+            <h3>Análisis de Cumplimiento</h3>
+            <p>Ingresa el nombre o identificación de una contraparte para verificar antecedentes de financiamiento del terrorismo.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Database Explorer -->
+      <section class="panel explorer-panel">
+        <div class="panel-header">
+          <h2>db Explorador de Listados de RePET</h2>
+          <p class="panel-desc">Visualiza y filtra los datos almacenados en la caché local del servidor.</p>
+        </div>
+        <div class="panel-body">
+          <!-- Tabs -->
+          <div class="tabs-header">
+            <button class="tab-btn active" data-tab="personas">Personas Físicas</button>
+            <button class="tab-btn" data-tab="entidades">Entidades Jurídicas</button>
+          </div>
+
+          <!-- Filter & Search in DB Explorer -->
+          <div class="filter-bar">
+            <input type="text" id="dbSearchInput" placeholder="Filtrar por nombre, alias, documento, referencia...">
+          </div>
+
+          <!-- Table Container -->
+          <div class="table-wrapper">
+            <table class="data-table" id="dbTable">
+              <thead>
+                <tr id="tableHeaderRow">
+                  <!-- Renderizado dinámico de encabezados -->
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr>
+                  <td colspan="4" class="text-center">Cargando base de datos...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination -->
+          <div class="pagination-footer">
+            <span class="pagination-info" id="paginationInfo">Mostrando 0 de 0</span>
+            <div class="pagination-controls">
+              <button id="btnPrevPage" disabled class="btn-icon">◀️</button>
+              <span class="current-page-num" id="currentPageNum">1</span>
+              <button id="btnNextPage" disabled class="btn-icon">▶️</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Desarrollado para demostración de cumplimiento normativo (CNV / UIF Argentina). Los datos provienen del sitio oficial <a href="https://repet.jus.gob.ar/" target="_blank" rel="noopener noreferrer">repet.jus.gob.ar</a>.</p>
+    </footer>
+  </div>
+</body>
+</html>
