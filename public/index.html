@@ -71,10 +71,19 @@
             <div class="form-group">
               <div class="slider-header">
                 <label for="threshold">Umbral de Similitud (Jaro-Winkler)</label>
-                <span class="slider-value" id="thresholdValue">80%</span>
+                <span class="slider-value" id="thresholdValue">75%</span>
               </div>
-              <input type="range" id="threshold" min="50" max="100" value="80" class="range-slider">
-              <span class="help-text">Valores más altos exigen mayor coincidencia de deletreo. Recomendado: 80%.</span>
+              <input type="range" id="threshold" min="50" max="100" value="75" class="range-slider">
+              <span class="help-text">Valores más altos exigen mayor coincidencia de deletreo completo. Recomendado: 75%.</span>
+            </div>
+            
+            <div class="form-group">
+              <div class="slider-header">
+                <label for="coverage">Umbral de Cobertura (Token-Set)</label>
+                <span class="slider-value" id="coverageValue">80%</span>
+              </div>
+              <input type="range" id="coverage" min="50" max="100" value="80" class="range-slider">
+              <span class="help-text">Porcentaje de palabras del input contenidas en el registro. Recomendado: 80%.</span>
             </div>
 
             <button type="submit" class="btn-primary" id="btnRunScreening">Evaluar Riesgo</button>
