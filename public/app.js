@@ -176,7 +176,7 @@ function renderTableBody(items) {
       html += `
         <tr>
           <td>
-            <div style="font-weight: 600; color: #fff;">${fullName}</div>
+            <div style="font-weight: 600; color: var(--text-primary);">${fullName}</div>
             <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.15rem;">
               ${p.INDIVIDUAL_ALIAS && p.INDIVIDUAL_ALIAS.length > 0 ? 'Alias: ' + p.INDIVIDUAL_ALIAS.map(a => a.ALIAS_NAME).slice(0, 3).join(', ') : 'Sin Alias'}
             </div>
@@ -210,7 +210,7 @@ function renderTableBody(items) {
       html += `
         <tr>
           <td>
-            <div style="font-weight: 600; color: #fff;">${e.FIRST_NAME}</div>
+            <div style="font-weight: 600; color: var(--text-primary);">${e.FIRST_NAME}</div>
           </td>
           <td>
             <div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start;">
