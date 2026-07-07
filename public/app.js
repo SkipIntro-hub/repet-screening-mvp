@@ -20,6 +20,8 @@ const elements = {
   clientNameInput: document.getElementById('clientName'),
   thresholdInput: document.getElementById('threshold'),
   thresholdValue: document.getElementById('thresholdValue'),
+  coverageInput: document.getElementById('coverage'),
+  coverageValue: document.getElementById('coverageValue'),
   btnRunScreening: document.getElementById('btnRunScreening'),
   
   resultsContainer: document.getElementById('resultsContainer'),
@@ -250,6 +252,7 @@ async function handleScreeningSubmit(e) {
   
   const query = elements.clientNameInput.value.trim();
   const threshold = parseFloat(elements.thresholdInput.value) / 100;
+  const coverage = parseFloat(elements.coverageInput.value) / 100;
   
   if (!query) return;
 
@@ -260,14 +263,14 @@ async function handleScreeningSubmit(e) {
   elements.resultsContainer.style.display = 'none';
 
   try {
-    const url = `/api/search?q=${encodeURIComponent(query)}&threshold=${threshold}`;
+    const url = `/api/search?q=${encodeURIComponent(query)}&threshold=${threshold}&coverage=${coverage}`;
     const res = await fetch(url);
     const data = await res.json();
     
     renderScreeningResults(data);
   } catch (error) {
     console.error('Error al realizar screening:', error);
-    elements.resultsList.innerHTML = `<p style="color: var(--accent-rose); font-weight: 600; text-align: center;">Error al conectar con el motor de screening.</p>`;
+    elements.resultsList.innerHTML = `<p style="color: #ff3b30; font-weight: 600; text-align: center;">Error al conectar con el motor de screening.</p>`;
     elements.resultsContainer.style.display = 'block';
   } finally {
     elements.btnRunScreening.textContent = 'Evaluar Riesgo';
@@ -281,10 +284,10 @@ function renderScreeningResults(data) {
   
   if (results.length === 0) {
     elements.resultsList.innerHTML = `
-      <div class="welcome-screen" style="border-color: var(--accent-emerald); background: rgba(16, 185, 129, 0.02);">
-        <div class="welcome-icon" style="opacity: 1; color: var(--accent-emerald);">✅</div>
-        <h3 style="color: #fff;">Sin Coincidencias Críticas</h3>
-        <p>No se encontraron personas o entidades en el RePET que coincidan con "${data.query}" usando un umbral del ${Math.round(data.threshold * 100)}%.</p>
+      <div class="welcome-screen" style="border-color: var(--apple-green); background: var(--apple-green-light);">
+        <div class="welcome-icon" style="opacity: 1; color: var(--apple-green);">✅</div>
+        <h3 style="color: var(--text-primary);">Sin Coincidencias Críticas</h3>
+        <p style="color: var(--text-secondary);">No se encontraron personas o entidades en el RePET que coincidan con "${data.query}" bajo los umbrales configurados (JW: ${Math.round(data.thresholds.jwYellow * 100)}% | Cobertura: ${Math.round(data.thresholds.coverage * 100)}%).</p>
       </div>
     `;
     elements.resultsContainer.style.display = 'block';
@@ -293,24 +296,26 @@ function renderScreeningResults(data) {
 
   let html = '';
   results.forEach(item => {
-    // Definir nivel de riesgo y clase CSS
-    const scorePct = Math.round(item.score * 100);
+    // Definir nivel de riesgo y clase CSS en base al estado devuelto
     let riskClass = 'low';
     let riskLabel = 'Riesgo Bajo';
     
-    if (scorePct >= 90) {
+    if (item.state === 'ROJO') {
       riskClass = 'critical';
       riskLabel = 'CRÍTICO';
-    } else if (scorePct >= 75) {
+    } else if (item.state === 'AMARILLO') {
       riskClass = 'warning';
-      riskLabel = 'Alerta';
+      riskLabel = 'ALERTA';
     }
+
+    const jwScorePct = Math.round(item.score * 100);
+    const covPct = Math.round(item.coverage * 100);
 
     // Documentos formateados
     let docsStr = 'No registra documentos en base de datos.';
     if (item.documents && item.documents.length > 0) {
       docsStr = item.documents.map(d => {
-        return `<span class="badge-tag" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); font-size: 0.7rem;">
+        return `<span class="badge-tag" style="background: var(--bg-system); border: 1px solid var(--border-subtle); font-size: 0.7rem; color: var(--text-primary);">
                   <strong>${d.TYPE_OF_DOCUMENT}:</strong> ${d.NUMBER} (${d.ISSUING_COUNTRY || 'Emisor no esp.'})
                 </span>`;
       }).join(' ');
@@ -336,7 +341,7 @@ function renderScreeningResults(data) {
       <div class="result-card">
         <div class="result-card-header">
           <div class="result-info">
-            <span class="result-name">${item.name}</span>
+            <span class="result-name" style="color: var(--text-primary); font-weight: 700;">${item.name}</span>
             <div class="result-meta">
               ${typeBadge}
               <span class="badge-tag">Ref: ${item.reference || 'N/A'}</span>
@@ -344,15 +349,18 @@ function renderScreeningResults(data) {
             </div>
           </div>
           <div class="score-badge ${riskClass}">
-            <span>${scorePct}%</span>
+            <span>${item.via === 'DOCUMENT' ? 'DOC' : jwScorePct + '%'}</span>
             <span class="score-label">${riskLabel}</span>
           </div>
         </div>
 
         <div class="result-details">
-          <span class="matched-pill">
-            Coincidencia en: <strong>${item.matchedField}</strong> (${item.matchedValue})
-          </span>
+          <div class="matched-pill" style="font-size: 10px; padding: 4px 8px; border-radius: 6px;">
+            Vía: <strong>${item.via}</strong> | Coincidencia en: <strong>${item.matchedField}</strong> (${item.matchedValue})
+          </div>
+          <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; padding-left: 2px;">
+            Similitud Jaro-Winkler: <strong>${jwScorePct}%</strong> | Cobertura Token-Set: <strong>${covPct}%</strong>
+          </div>
           <div class="detail-row" style="margin-top: 0.5rem;">
             <span class="detail-label">Identificaciones/Pasaportes:</span>
             <div style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.15rem;">${docsStr}</div>
@@ -384,9 +392,14 @@ function renderScreeningResults(data) {
 // Controladores de Eventos y Enlaces de Acciones
 // -------------------------------------------------------------
 
-// Slider de Umbral
+// Slider de Umbral Similitud
 elements.thresholdInput.addEventListener('input', (e) => {
   elements.thresholdValue.textContent = `${e.target.value}%`;
+});
+
+// Slider de Umbral Cobertura
+elements.coverageInput.addEventListener('input', (e) => {
+  elements.coverageValue.textContent = `${e.target.value}%`;
 });
 
 // Submit del Screening
